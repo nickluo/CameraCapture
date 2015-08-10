@@ -636,9 +636,15 @@ namespace VideoModule
             lSrcStride /= 4; // convert lSrcStride to YUYV
             lDestStride /= 4; // convert lDestStride to RGBQUAD
 
-            Parallel.For(0, dwHeightInPixels, y =>
+            var po = new ParallelOptions()
             {
-                Parallel.For(0, dwWidthInPixels>>1, x =>
+                MaxDegreeOfParallelism = 4,
+                //TaskScheduler = TaskScheduler.FromCurrentSynchronizationContext()
+            };
+
+            Parallel.For(0, dwHeightInPixels, po, y =>
+            {
+                Parallel.For(0, dwWidthInPixels>>1, po, x =>
                 {
                     var dIndex = y*lDestStride + (x<<1);
                     var sIndex = y*lSrcStride + x;
