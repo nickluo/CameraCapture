@@ -590,11 +590,17 @@ namespace VideoModule
 
             lSrcStride /= 3;
             lDestStride /= 4;
-            Parallel.For(0, dwHeightInPixels, y =>
+
+            var po = new ParallelOptions()
+            {
+                MaxDegreeOfParallelism = 32,
+            };
+
+            Parallel.For(0, dwHeightInPixels, po, y =>
             {
                 var destY = dest + y*lDestStride;
                 var sourceY = source + y*lSrcStride;
-                Parallel.For(0, dwWidthInPixels, x =>
+                Parallel.For(0, dwWidthInPixels, po, x =>
                 {
                     destY[x].R = sourceY[x].R;
                     destY[x].G = sourceY[x].G;
@@ -638,8 +644,7 @@ namespace VideoModule
 
             var po = new ParallelOptions()
             {
-                MaxDegreeOfParallelism = 4,
-                //TaskScheduler = TaskScheduler.FromCurrentSynchronizationContext()
+                MaxDegreeOfParallelism = 32,
             };
 
             Parallel.For(0, dwHeightInPixels, po, y =>
