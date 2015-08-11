@@ -13,5 +13,6 @@ namespace VideoModule
         int StartCapture(string pwszFileName, Guid subType);
         int StopCapture();
         bool IsCapturing();
+        void SnapShot(string format);
     }
 }

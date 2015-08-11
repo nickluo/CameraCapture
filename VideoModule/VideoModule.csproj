@@ -109,6 +109,7 @@
     <Compile Include="CProcess.cs" />
     <Compile Include="DrawDevice.cs" />
     <Compile Include="CCapture.cs" />
+    <Compile Include="FileHelper.cs" />
     <Compile Include="ICapture.cs" />
     <Compile Include="MfDevice.cs" />
     <Compile Include="RegisterDeviceNotifications.cs" />

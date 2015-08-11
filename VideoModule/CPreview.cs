@@ -9,7 +9,8 @@ namespace VideoModule
             :base(hVideo,hEvent)
         { }
 
-        protected override int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp) => Draw.DrawFrame(pBuffer);
+        protected override int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp, string ssFormat)
+            => Draw.DrawFrame(pBuffer, !string.IsNullOrEmpty(ssFormat), ssFormat);
     }
 
 }

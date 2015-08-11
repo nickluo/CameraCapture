@@ -203,7 +203,7 @@ namespace VideoModule
             return base.CloseDevice();
         }
 
-        protected override int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp)
+        protected override int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp, string ssFormat)
         {
             int hr;
             if (IsCapturing())
@@ -230,12 +230,12 @@ namespace VideoModule
                 //}
                 //Parallel.Invoke(()=>Draw.DrawFrame(pBuffer),()=> PWriter.WriteSample(0, pSample));
                 if (Succeeded(hr))
-                    hr = Draw.DrawFrame(pBuffer);
+                    hr = Draw.DrawFrame(pBuffer, !string.IsNullOrEmpty(ssFormat), ssFormat);
                 if (Succeeded(hr))
                     hr = PWriter.WriteSample(0, pSample);
             }
             else
-                hr = Draw.DrawFrame(pBuffer);
+                hr = Draw.DrawFrame(pBuffer, !string.IsNullOrEmpty(ssFormat), ssFormat);
             return hr;
         }
     }

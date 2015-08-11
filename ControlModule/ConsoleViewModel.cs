@@ -27,11 +27,18 @@ namespace ControlModule
                     OperationString = op == "Start" ? "Stop" : "Start";
                     ButtonShown = (OperationString == "Stop");
                 });
+            SnapCommand = new DelegateCommand(() =>
+            {
+                if (SelectedDevice == null)
+                    return;
+                eventAggregator.GetEvent<OperationEvent>().Publish("Snap");
+            });
             eventAggregator.GetEvent<NoticeFormatEvent>().Subscribe(str => FormatString = str);
         }
         public ObservableCollection<IDeviceInfo> DeviceItems { get; private set; }
 
         public ICommand PlayCommand { get; private set; }
+        public ICommand SnapCommand { get; private set; }
 
         private IDeviceInfo selectedDevice;
         public IDeviceInfo SelectedDevice

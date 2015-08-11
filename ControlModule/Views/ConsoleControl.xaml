@@ -48,9 +48,16 @@
         </ComboBox>
         <Button Style="{StaticResource AnimatedButtonStyle}" x:Name="buttonStart" Content="{Binding Path=OperationString}" HorizontalAlignment="Left" Height="28" Margin="120,86,0,0" VerticalAlignment="Top" Width="87"
                 Command="{Binding PlayCommand}" CommandParameter="{Binding Path=OperationString}"/>
+        <Button Style="{StaticResource AnimatedButtonStyle}" x:Name="buttonSnap" Margin="225,86,0,0" Height="28" Width="32" HorizontalAlignment="Left" VerticalAlignment="Top"
+                Command="{Binding SnapCommand}" HorizontalContentAlignment="Center" VerticalContentAlignment="Top">
+            <Button.Content>
+                <Image Source="/ControlModule;component/Resources/camera.png" Margin="3" />
+            </Button.Content>
+        </Button>
         <TextBlock x:Name="textBlock" HorizontalAlignment="Left" Margin="26,32,0,0" TextWrapping="Wrap" VerticalAlignment="Top"><Run Text="Source Device"/></TextBlock>
         <TextBlock x:Name="textBlock1" HorizontalAlignment="Right" Margin="0,10,10,0" TextWrapping="Wrap" Text="{Binding Path=FormatString}" VerticalAlignment="Top" Width="Auto"/>
-        <Image x:Name="image" HorizontalAlignment="Left" Height="40" Margin="50,82,0,0" VerticalAlignment="Top" Width="40" 
+        <Image x:Name="image" HorizontalAlignment="Left" Height="40" Margin="50,80
+               ,0,0" VerticalAlignment="Top" Width="40" 
                Source="/ControlModule;component/Resources/red.png" 
                Visibility="{Binding ButtonShown, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Image.Triggers>

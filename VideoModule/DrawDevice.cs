@@ -1,13 +1,19 @@
 ﻿using System;
-using System.Diagnostics;
+using System.Configuration;
 using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using MediaFoundation;
 using MediaFoundation.Misc;
 using SlimDX;
 using SlimDX.Direct3D9;
+using Color = System.Drawing.Color;
 
 namespace VideoModule
 {
@@ -427,12 +433,51 @@ namespace VideoModule
             return hr;
         }
 
+        //[DllImport("kernel32.dll", EntryPoint = "CopyMemory", SetLastError = false)]
+        //private static extern void CopyMemory(IntPtr dest, IntPtr src, uint count);
+
+        private readonly Assembly presentationCore = Assembly.GetAssembly(typeof (BitmapEncoder));
+
+        private void SnapShot(IntPtr sourcePtr, int pitch, int width, int height, string format)
+        {
+            var sync = new AutoResetEvent(false);
+            Task.Factory.StartNew(() =>
+            {
+                var source = BitmapSource.Create(width, height, 72, 72, PixelFormats.Bgr32, null,
+                    sourcePtr, pitch * height, pitch);
+                sync.Set();
+                BitmapEncoder encoder;
+                var encoderType = presentationCore.GetType(
+                    $"System.Windows.Media.Imaging.{format}BitmapEncoder"
+                    , false, true);
+                if (encoderType == null)
+                    encoder = new JpegBitmapEncoder();
+                else
+                {
+                    encoder = Activator.CreateInstance(encoderType) as BitmapEncoder;
+                    if (encoder == null)
+                        return;
+                }
+                var frame = BitmapFrame.Create(source);
+                encoder.Frames.Add(frame);
+                using (
+                    var file =
+                        File.Create(FileHelper.SavePath + "Snapshot " + DateTime.Now.ToString("yyyyMMddTHHmmss.") +
+                                    format?.ToLower()))
+                {
+                    encoder.Save(file);
+                    file.Close();
+                }
+            });
+            sync.WaitOne();
+        }
+
         //-------------------------------------------------------------------
         // DrawFrame
         //
         // Draw the video frame.
         //-------------------------------------------------------------------
-        public int DrawFrame(IMFMediaBuffer pCaptureDeviceBuffer)
+        public int DrawFrame(IMFMediaBuffer pCaptureDeviceBuffer, bool snap, string format=null)
         {
             if (m_convertFn == null)
             {
@@ -487,6 +532,8 @@ namespace VideoModule
                     {
                         // Convert the frame. This also copies it to the Direct3D surface.
                         m_convertFn(dr.Data.DataPointer, dr.Pitch, pbScanline0, lStride, m_width, m_height);
+                        if (snap)
+                            SnapShot(dr.Data.DataPointer, dr.Pitch, m_width, m_height, format);
                     }
                 }
                 finally

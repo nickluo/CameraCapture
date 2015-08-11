@@ -1,6 +1,7 @@
 ﻿using System;
 using System.ComponentModel.Composition;
 using System.Configuration;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows;
 using CameraCapture.Interface;
@@ -15,11 +16,11 @@ namespace VideoModule
     [Export("WebCam",typeof(BindableBase))]
     class WebCamViewModel : BindableBase, IPartImportsSatisfiedNotification, IDisplayAdapter, IDisposable
     {
+        // ReSharper disable InconsistentNaming
         private const int WM_APP = 0x8000;
         private const int WM_APP_PREVIEW_ERROR = WM_APP + 2;
         private const int WM_DEVICECHANGE = 0x0219;
-
-        private const string DefaultFileName = "test.mp4";
+        // ReSharper enable InconsistentNaming
 
         // Category for capture devices
         // ReSharper disable once InconsistentNaming
@@ -63,6 +64,11 @@ namespace VideoModule
             eventAggregator.GetEvent<ActivateDeviceEvent>().Subscribe(OnActivate, ThreadOption.BackgroundThread, false);
             eventAggregator.GetEvent<OperationEvent>().Subscribe(OnOperation,ThreadOption.BackgroundThread);
         }
+        private static string ToTitleCase(string str)
+        {
+            return string.IsNullOrEmpty(str) ? 
+                str : CultureInfo.CurrentCulture.TextInfo.ToTitleCase(str.ToLower());
+        }
 
         private void OnOperation(string op)
         {
@@ -70,12 +76,17 @@ namespace VideoModule
             switch (op)
             {
                 case "Start":
-                    var filename = ConfigurationManager.AppSettings["filename"];
-                    capture?.StartCapture(filename?? DefaultFileName, MFMediaType.H264);
+                    var filename = FileHelper.SavePath + "Video " + DateTime.Now.ToString("yyyyMMddTHHmmss") + ".mp4";
+                    capture?.StartCapture(filename, MFMediaType.H264);
                     break;
                 case "Stop":  
                     capture?.StopCapture();
                     break;
+                case "Snap":
+                    capture?.SnapShot(ToTitleCase(ConfigurationManager.AppSettings["snapformat"]));
+                    break;
+                default:
+                    throw new InvalidOperationException(op);
             }
         }
 

@@ -287,6 +287,16 @@ namespace VideoModule
             GC.SuppressFinalize(this);
         }
 
+        private string snapFormat = string.Empty;
+
+        public void SnapShot(string format)
+        {
+            lock (LockSync)
+            {
+                snapFormat = format;
+            }
+        }
+
         #endregion
 
         #region Protected Methods
@@ -355,7 +365,9 @@ namespace VideoModule
 
         #endregion
 
-        protected abstract int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp);
+        
+
+        protected abstract int OnFrame(IMFSample pSample, IMFMediaBuffer pBuffer, long llTimestamp, string ssFormat);
 
         #region IMFSourceReaderCallback Members
         // IMFSourceReaderCallback methods
@@ -380,7 +392,10 @@ namespace VideoModule
                             hr = pSample.GetBufferByIndex(0, out pBuffer);
 
                         if (Succeeded(hr))
-                            hr = OnFrame(pSample, pBuffer, llTimestamp);
+                        {
+                            hr = OnFrame(pSample, pBuffer, llTimestamp, snapFormat);
+                            snapFormat = string.Empty;
+                        }
                     }
 
                     // Request the next frame.
