@@ -111,6 +111,7 @@
     <Compile Include="CCapture.cs" />
     <Compile Include="FileHelper.cs" />
     <Compile Include="ICapture.cs" />
+    <Compile Include="ImageHelper.cs" />
     <Compile Include="MfDevice.cs" />
     <Compile Include="RegisterDeviceNotifications.cs" />
     <Compile Include="VideoBufferLock.cs" />

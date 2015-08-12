@@ -1,19 +1,12 @@
 ﻿using System;
-using System.Configuration;
 using System.Drawing;
-using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using MediaFoundation;
 using MediaFoundation.Misc;
 using SlimDX;
 using SlimDX.Direct3D9;
-using Color = System.Drawing.Color;
 
 namespace VideoModule
 {
@@ -67,11 +60,13 @@ namespace VideoModule
         {
             public readonly Guid SubType;
             public readonly VideoConversion VideoConvertFunction;
+            public readonly Format DxFormat;
 
-            public VideoFormatGUID(Guid FormatGuid, VideoConversion cvt)
+            public VideoFormatGUID(Guid FormatGuid, VideoConversion cvt, Format format)
             {
                 SubType = FormatGuid;
                 VideoConvertFunction = cvt;
+                DxFormat = format;
             }
         }
 
@@ -88,26 +83,30 @@ namespace VideoModule
 
         #region Private Members
 
-        private IntPtr m_hwnd;
-        private Device m_pDevice;
-        private SwapChain m_pSwapChain;
+        private IntPtr hwnd;
+        private Device pDevice;
+        private SwapChain pSwapChain;
+        private Surface offScreenSurface;
+        private Format offScreenFormat;
+        private int offScreenCoeffN = 4;
+        private int offScreenCoeffD = 1;
 
-        private PresentParameters[] m_d3dpp;
+        private PresentParameters[] d3dpp;
 
         // Format information
-        private Format m_format;
-        private int m_width;
-        private int m_height;
-        private int m_lDefaultStride;
-        private MFRatio m_PixelAR;
-        private Rectangle m_rcDest;       // Destination rectangle
+        private Format format;
+        private int width;
+        private int height;
+        private int lDefaultStride;
+        private MFRatio pixelAR;
+        private Rectangle rcDest;       // Destination rectangle
 
         private readonly VideoFormatGUID[] VideoFormatDefs =
         {
-            new VideoFormatGUID(MFMediaType.RGB32, TransformImage_RGB32),
-            new VideoFormatGUID(MFMediaType.RGB24, TransformImage_RGB24),
-            new VideoFormatGUID(MFMediaType.YUY2, TransformImage_YUY2),
-            new VideoFormatGUID(MFMediaType.NV12, TransformImage_NV12)
+            new VideoFormatGUID(MFMediaType.RGB32, TransformImage_RGB32, Format.X8R8G8B8),
+            new VideoFormatGUID(MFMediaType.RGB24, TransformImage_RGB24, Format.R8G8B8),
+            new VideoFormatGUID(MFMediaType.YUY2, TransformImage_YUY2, Format.Yuy2),
+            new VideoFormatGUID(MFMediaType.NV12, TransformImage_NV12, Format.Unknown)
         };
 
     private VideoConversion m_convertFn;
@@ -119,18 +118,18 @@ namespace VideoModule
         //-------------------------------------------------------------------
         public DrawDevice()
         {
-            m_hwnd = IntPtr.Zero;
-            m_pDevice = null;
-            m_pSwapChain = null;
+            hwnd = IntPtr.Zero;
+            pDevice = null;
+            pSwapChain = null;
 
-            m_d3dpp = null;
+            d3dpp = null;
 
-            m_format = Format.X8R8G8B8;
-            m_width = 0;
-            m_height = 0;
-            m_lDefaultStride = 0;
-            m_PixelAR.Denominator = m_PixelAR.Numerator = 1;
-            m_rcDest = Rectangle.Empty;
+            format = Format.X8R8G8B8;
+            width = 0;
+            height = 0;
+            lDefaultStride = 0;
+            pixelAR.Denominator = pixelAR.Numerator = 1;
+            rcDest = Rectangle.Empty;
             m_convertFn = null;
         }
 
@@ -140,7 +139,7 @@ namespace VideoModule
 #if DEBUG
         ~DrawDevice()
         {
-            Debug.Assert(m_pSwapChain == null || m_pDevice == null);
+            Debug.Assert(pSwapChain == null || pDevice == null);
             DestroyDevice();
         }
 #endif
@@ -160,13 +159,13 @@ namespace VideoModule
 
         private int TestCooperativeLevel()
         {
-            if (m_pDevice == null)
+            if (pDevice == null)
             {
                 return E_Fail;
             }
 
             // Check the current status of D3D9 device.
-            var r = m_pDevice.TestCooperativeLevel();
+            var r = pDevice.TestCooperativeLevel();
 
             var hr = r.Code;
 
@@ -176,15 +175,34 @@ namespace VideoModule
         //-------------------------------------------------------------------
         // SetConversionFunction
         //
-        // Set the conversion function for the specified video format.
+        // Set the conversion function for the specified video snapFormat.
         //-------------------------------------------------------------------
 
         private int SetConversionFunction(Guid subtype)
         {
-            var q = from item in VideoFormatDefs
+            var q = (from item in VideoFormatDefs
                 where item.SubType == subtype
-                select item.VideoConvertFunction;
-            m_convertFn = q.FirstOrDefault();
+                select item).FirstOrDefault();
+            m_convertFn = q.VideoConvertFunction;
+            offScreenFormat = q.DxFormat;
+            switch (offScreenFormat)
+            {
+                case Format.R8G8B8:
+                    offScreenCoeffN = 3;
+                    offScreenCoeffD = 1;
+                    break;
+                case Format.Yuy2:
+                    offScreenCoeffN = 2;
+                    offScreenCoeffD = 1;
+                    break;
+                case Format.X8B8G8R8:
+                case Format.A8B8G8R8:
+                case Format.X8R8G8B8:
+                case Format.A8R8G8B8:
+                    offScreenCoeffN = 4;
+                    offScreenCoeffD = 1;
+                    break;
+            }
             return (m_convertFn == null) ? MFError.MF_E_INVALIDMEDIATYPE : S_Ok;
         }
 
@@ -196,27 +214,27 @@ namespace VideoModule
 
         private int CreateSwapChains()
         {
-            if (m_pSwapChain != null)
+            if (pSwapChain != null)
             {
-                m_pSwapChain.Dispose();
-                m_pSwapChain = null;
+                pSwapChain.Dispose();
+                pSwapChain = null;
             }
 
             var pp = new PresentParameters
             {
                 EnableAutoDepthStencil = false,
-                BackBufferWidth = m_width,
-                BackBufferHeight = m_height,
+                BackBufferWidth = width,
+                BackBufferHeight = height,
                 Windowed = true,
                 SwapEffect = SwapEffect.Flip,
-                DeviceWindowHandle = m_hwnd,
+                DeviceWindowHandle = hwnd,
                 BackBufferFormat = Format.X8R8G8B8,
                 PresentFlags = PresentFlags.DeviceClip | PresentFlags.LockableBackBuffer,
                 PresentationInterval = PresentInterval.Immediate,
                 BackBufferCount = NUM_BACK_BUFFERS
             };
 
-            m_pSwapChain = new SwapChain(m_pDevice, pp);
+            pSwapChain = new SwapChain(pDevice, pp);
 
             return S_Ok;
         }
@@ -231,14 +249,24 @@ namespace VideoModule
 
         private void UpdateDestinationRect()
         {
-            var rcSrc = new Rectangle(0, 0, m_width, m_height);
-            var rcClient = GetClientRect(m_hwnd);
+            //Try to create off-screen surface
+            offScreenSurface?.Dispose();
+            if (offScreenFormat == Format.Unknown || offScreenFormat == Format.A8R8G8B8 ||
+                offScreenFormat == Format.X8R8G8B8)
+                offScreenSurface = null;
+            else
+                offScreenSurface = Surface.CreateOffscreenPlain(
+                    pDevice, width, height, offScreenFormat, Pool.Default);
+
+            var rcSrc = new Rectangle(0, 0, width, height);
+            var rcClient = GetClientRect(hwnd);
             var rectanClient = new Rectangle(rcClient.Left, rcClient.Top, rcClient.Right - rcClient.Left, rcClient.Bottom - rcClient.Top);
 
-            rcSrc = CorrectAspectRatio(rcSrc, m_PixelAR);
+            rcSrc = CorrectAspectRatio(rcSrc, pixelAR);
 
-            m_rcDest = LetterBoxRect(rcSrc, rectanClient);
+            rcDest = LetterBoxRect(rcSrc, rectanClient);
         }
+
 
         #endregion
 
@@ -249,9 +277,9 @@ namespace VideoModule
         //
         // Create the Direct3D device.
         //-------------------------------------------------------------------
-        public int CreateDevice(IntPtr hwnd)
+        public int CreateDevice(IntPtr hWindow)
         {
-            if (m_pDevice != null)
+            if (pDevice != null)
             {
                 return S_Ok;
             }
@@ -264,7 +292,7 @@ namespace VideoModule
                 SwapEffect = SwapEffect.Copy,
                 PresentationInterval = PresentInterval.Immediate,
                 Windowed = true,
-                DeviceWindowHandle = hwnd,
+                DeviceWindowHandle = hWindow,
                 BackBufferHeight = 0,
                 BackBufferWidth = 0,
                 EnableAutoDepthStencil = false
@@ -272,12 +300,12 @@ namespace VideoModule
 
             using (var d = new Direct3D())
             {
-                m_pDevice = new Device(d, 0, DeviceType.Hardware, hwnd,
+                pDevice = new Device(d, 0, DeviceType.Hardware, hWindow,
                     CreateFlags.HardwareVertexProcessing | CreateFlags.FpuPreserve | CreateFlags.Multithreaded, pp);
             }
 
-            m_hwnd = hwnd;
-            m_d3dpp = pp;
+            hwnd = hWindow;
+            d3dpp = pp;
 
             return S_Ok;
         }
@@ -291,20 +319,20 @@ namespace VideoModule
         {
             var hr = S_Ok;
 
-            if (m_pDevice != null)
+            if (pDevice != null)
             {
-                var d3dpp = (PresentParameters[])m_d3dpp.Clone();
+                var d3dppClone = (PresentParameters[])d3dpp.Clone();
 
                 try
                 {
-                    if (m_pSwapChain != null)
+                    if (pSwapChain != null)
                     {
-                        m_pSwapChain.Dispose();
-                        m_pSwapChain = null;
+                        pSwapChain.Dispose();
+                        pSwapChain = null;
                     }
-                    d3dpp[0].BackBufferHeight = 0;
-                    d3dpp[0].BackBufferWidth = 0;
-                    var r = m_pDevice.Reset(d3dpp);
+                    d3dppClone[0].BackBufferHeight = 0;
+                    d3dppClone[0].BackBufferWidth = 0;
+                    var r = pDevice.Reset(d3dppClone);
 
                     if (r.IsFailure)
                     {
@@ -317,9 +345,9 @@ namespace VideoModule
                 }
             }
 
-            if (m_pDevice == null)
+            if (pDevice == null)
             {
-                hr = CreateDevice(m_hwnd);
+                hr = CreateDevice(hwnd);
 
                 if (Failed(hr))
                 {
@@ -327,7 +355,7 @@ namespace VideoModule
                 }
             }
 
-            if ((m_pSwapChain == null) && (m_format != Format.Unknown))
+            if ((pSwapChain == null) && (format != Format.Unknown))
             {
                 hr = CreateSwapChains();
                 if (Failed(hr)) { return hr; }
@@ -345,22 +373,18 @@ namespace VideoModule
         //-------------------------------------------------------------------
         public void DestroyDevice()
         {
-            if (m_pSwapChain != null)
-            {
-                m_pSwapChain.Dispose();
-                m_pSwapChain = null;
-            }
-            if (m_pDevice != null)
-            {
-                m_pDevice.Dispose();
-                m_pDevice = null;
-            }
+            offScreenSurface?.Dispose();
+            offScreenSurface = null;
+            pSwapChain?.Dispose();
+            pSwapChain = null;
+            pDevice?.Dispose();
+            pDevice = null;
         }
 
         //-------------------------------------------------------------------
         // SetVideoType
         //
-        // Set the video format.
+        // Set the video snapFormat.
         //-------------------------------------------------------------------
         public int SetVideoType(IMFMediaType pType)
         {
@@ -376,7 +400,7 @@ namespace VideoModule
                     throw new Exception();
 
                 // Choose a conversion function.
-                // (This also validates the format type.)
+                // (This also validates the snapFormat type.)
 
                 hr = SetConversionFunction(subtype);
                 if (Failed(hr))
@@ -387,12 +411,12 @@ namespace VideoModule
                 //
 
                 // Get the frame size.
-                hr = CProcess.MfGetAttributeSize(pType, out m_width, out m_height);
+                hr = CProcess.MfGetAttributeSize(pType, out width, out height);
                 if (Failed(hr))
                     throw new Exception();
 
                 // Get the image stride.
-                hr = GetDefaultStride(pType, out m_lDefaultStride);
+                hr = GetDefaultStride(pType, out lDefaultStride);
                 if (Failed(hr))
                     throw new Exception();
 
@@ -401,15 +425,15 @@ namespace VideoModule
 
                 if (Succeeded(hr))
                 {
-                    m_PixelAR = PAR;
+                    pixelAR = PAR;
                 }
                 else
                 {
-                    m_PixelAR.Numerator = m_PixelAR.Denominator = 1;
+                    pixelAR.Numerator = pixelAR.Denominator = 1;
                 }
 
                 var f = new FourCC(subtype);
-                m_format = (Format)f.ToInt32();
+                format = (Format) f.ToInt32();
 
                 // Create Direct3D swap chains.
 
@@ -421,12 +445,13 @@ namespace VideoModule
                 // aspect ratio.
 
                 UpdateDestinationRect();
+
             }
             finally
             {
                 if (Failed(hr))
                 {
-                    m_format = Format.Unknown;
+                    format = Format.Unknown;
                     m_convertFn = null;
                 }
             }
@@ -436,48 +461,12 @@ namespace VideoModule
         //[DllImport("kernel32.dll", EntryPoint = "CopyMemory", SetLastError = false)]
         //private static extern void CopyMemory(IntPtr dest, IntPtr src, uint count);
 
-        private readonly Assembly presentationCore = Assembly.GetAssembly(typeof (BitmapEncoder));
-
-        private void SnapShot(IntPtr sourcePtr, int pitch, int width, int height, string format)
-        {
-            var sync = new AutoResetEvent(false);
-            Task.Factory.StartNew(() =>
-            {
-                var source = BitmapSource.Create(width, height, 72, 72, PixelFormats.Bgr32, null,
-                    sourcePtr, pitch * height, pitch);
-                sync.Set();
-                BitmapEncoder encoder;
-                var encoderType = presentationCore.GetType(
-                    $"System.Windows.Media.Imaging.{format}BitmapEncoder"
-                    , false, true);
-                if (encoderType == null)
-                    encoder = new JpegBitmapEncoder();
-                else
-                {
-                    encoder = Activator.CreateInstance(encoderType) as BitmapEncoder;
-                    if (encoder == null)
-                        return;
-                }
-                var frame = BitmapFrame.Create(source);
-                encoder.Frames.Add(frame);
-                using (
-                    var file =
-                        File.Create(FileHelper.SavePath + "Snapshot " + DateTime.Now.ToString("yyyyMMddTHHmmss.") +
-                                    format?.ToLower()))
-                {
-                    encoder.Save(file);
-                    file.Close();
-                }
-            });
-            sync.WaitOne();
-        }
-
         //-------------------------------------------------------------------
         // DrawFrame
         //
         // Draw the video frame.
         //-------------------------------------------------------------------
-        public int DrawFrame(IMFMediaBuffer pCaptureDeviceBuffer, bool snap, string format=null)
+        public int DrawFrame(IMFMediaBuffer pCaptureDeviceBuffer, bool snap, string snapFormat=null)
         {
             if (m_convertFn == null)
             {
@@ -488,11 +477,14 @@ namespace VideoModule
             Result res;
 
             Surface pSurf;
+            
 
-            if (m_pDevice == null || m_pSwapChain == null)
+            if (pDevice == null || pSwapChain == null)
             {
                 return S_Ok;
             }
+
+            var r = new Rectangle(0, 0, width, height);
 
             // Helper object to lock the video buffer.
             using (var xbuffer = new VideoBufferLock(pCaptureDeviceBuffer))
@@ -508,56 +500,66 @@ namespace VideoModule
                     // Lock the video buffer. This method returns a pointer to the first scan
                     // line in the image, and the stride in bytes.
 
-                    hr = xbuffer.LockBuffer(m_lDefaultStride, m_height, out pbScanline0, out lStride);
+                    hr = xbuffer.LockBuffer(lDefaultStride, height, out pbScanline0, out lStride);
                     if (Failed(hr))
                         throw new InvalidOperationException();
                 }
                 catch (InvalidOperationException)
                 {
-                    //SafeRelease(pBB);
-                    //SafeRelease(pSurf);
                     return hr;
                 }
                 
 
                 // Get the swap-chain surface.
-                pSurf = m_pSwapChain.GetBackBuffer(0);
+                pSurf = pSwapChain.GetBackBuffer(0);
 
                 // Lock the swap-chain surface and get Graphic stream object.
-                var dr = pSurf.LockRectangle(LockFlags.NoSystemLock);
 
                 try
                 {
-                    using (dr.Data)
+                    DataRectangle dr;
+                    if (offScreenSurface == null)
                     {
+                        dr = pSurf.LockRectangle(LockFlags.NoSystemLock);
                         // Convert the frame. This also copies it to the Direct3D surface.
-                        m_convertFn(dr.Data.DataPointer, dr.Pitch, pbScanline0, lStride, m_width, m_height);
-                        if (snap)
-                            SnapShot(dr.Data.DataPointer, dr.Pitch, m_width, m_height, format);
+                        m_convertFn(dr.Data.DataPointer, dr.Pitch, pbScanline0, lStride, width, height);
                     }
+                    else
+                    {
+                        var off = offScreenSurface.LockRectangle(LockFlags.NoSystemLock);
+                        MFExtern.MFCopyImage(off.Data.DataPointer, off.Pitch, pbScanline0, lStride,
+                                  width * offScreenCoeffN / offScreenCoeffD, height);
+                        offScreenSurface.UnlockRectangle();
+                        pDevice.StretchRectangle(offScreenSurface, pSurf, TextureFilter.Linear);
+                        dr = pSurf.LockRectangle(LockFlags.NoSystemLock);
+                    }
+
+                    if (snap)
+                            ImageHelper.SnapShot(dr.Data.DataPointer, dr.Pitch, width, height, snapFormat);
                 }
                 finally
                 {
+                    
                     res = pSurf.UnlockRectangle();
                     MFError.ThrowExceptionForHR(res.Code);
                 }
             }
 
             // Color fill the back buffer.
-            var pBB = m_pDevice.GetBackBuffer(0, 0);
+            var pBB = pDevice.GetBackBuffer(0, 0);
 
-            m_pDevice.ColorFill(pBB, DefualtBackColor);
+            pDevice.ColorFill(pBB, DefualtBackColor);
 
             // Blit the frame.
-            var r = new Rectangle(0, 0, m_width, m_height);
+            
 
-            res = m_pDevice.StretchRectangle(pSurf, r, pBB, m_rcDest, TextureFilter.Linear);
+            res = pDevice.StretchRectangle(pSurf, r, pBB, rcDest, TextureFilter.Linear);
             hr = res.Code;
 
             if (res.IsSuccess)
             {
                 // Present the frame.
-                res = m_pDevice.Present();
+                res = pDevice.Present();
                 hr = res.Code;
             }
 
@@ -570,7 +572,7 @@ namespace VideoModule
         //-------------------------------------------------------------------
         //  IsFormatSupported
         //
-        //  Query if a format is supported.
+        //  Query if a snapFormat is supported.
         //-------------------------------------------------------------------
         public bool IsFormatSupported(Guid subtype)
         {
@@ -580,7 +582,7 @@ namespace VideoModule
         //-------------------------------------------------------------------
         // GetFormat
         //
-        // Get a supported output format by index.
+        // Get a supported output snapFormat by index.
         //-------------------------------------------------------------------
         public int GetFormat(int index, out Guid pSubtype)
         {
@@ -706,95 +708,95 @@ namespace VideoModule
             });
         }
 
-        //-------------------------------------------------------------------
-        // TransformImage_NV12
-        //
-        // NV12 to RGB-32
-        //-------------------------------------------------------------------
-        unsafe private static void TransformImage_NV12(IntPtr pDest, int lDestStride, IntPtr pSrc, int lSrcStride, int dwWidthInPixels, int dwHeightInPixels)
+    //-------------------------------------------------------------------
+    // TransformImage_NV12
+    //
+    // NV12 to RGB-32
+    //-------------------------------------------------------------------
+    unsafe private static void TransformImage_NV12(IntPtr pDest, int lDestStride, IntPtr pSrc, int lSrcStride, int dwWidthInPixels, int dwHeightInPixels)
+    {
+        byte* lpBitsY = (byte*)pSrc;
+        byte* lpBitsCb = lpBitsY + (dwHeightInPixels * lSrcStride);
+        byte* lpBitsCr = lpBitsCb + 1;
+
+        // ReSharper disable TooWideLocalVariableScope
+        byte* lpLineY1;
+        byte* lpLineY2;
+        byte* lpLineCr;
+        byte* lpLineCb;
+        // ReSharper enable TooWideLocalVariableScope
+
+        byte* lpDibLine1 = (byte*)pDest;
+        for (var y = 0; y < dwHeightInPixels; y += 2)
         {
-            byte* lpBitsY = (byte*)pSrc;
-            byte* lpBitsCb = lpBitsY + (dwHeightInPixels * lSrcStride);
-            byte* lpBitsCr = lpBitsCb + 1;
+            lpLineY1 = lpBitsY;
+            lpLineY2 = lpBitsY + lSrcStride;
+            lpLineCr = lpBitsCr;
+            lpLineCb = lpBitsCb;
 
-            // ReSharper disable TooWideLocalVariableScope
-            byte* lpLineY1;
-            byte* lpLineY2;
-            byte* lpLineCr;
-            byte* lpLineCb;
-            // ReSharper enable TooWideLocalVariableScope
+            byte* lpDibLine2 = lpDibLine1 + lDestStride;
 
-            byte* lpDibLine1 = (byte*)pDest;
-            for (var y = 0; y < dwHeightInPixels; y += 2)
+            for (var x = 0; x < dwWidthInPixels; x += 2)
             {
-                lpLineY1 = lpBitsY;
-                lpLineY2 = lpBitsY + lSrcStride;
-                lpLineCr = lpBitsCr;
-                lpLineCb = lpBitsCb;
+                byte y0 = lpLineY1[0];
+                byte y1 = lpLineY1[1];
+                byte y2 = lpLineY2[0];
+                byte y3 = lpLineY2[1];
+                byte cb = lpLineCb[0];
+                byte cr = lpLineCr[0];
 
-                byte* lpDibLine2 = lpDibLine1 + lDestStride;
+                RGBQUAD r = ConvertYCrCbToRGB(y0, cr, cb);
+                lpDibLine1[0] = r.B;
+                lpDibLine1[1] = r.G;
+                lpDibLine1[2] = r.R;
+                lpDibLine1[3] = 0; // Alpha
 
-                for (var x = 0; x < dwWidthInPixels; x += 2)
-                {
-                    byte y0 = lpLineY1[0];
-                    byte y1 = lpLineY1[1];
-                    byte y2 = lpLineY2[0];
-                    byte y3 = lpLineY2[1];
-                    byte cb = lpLineCb[0];
-                    byte cr = lpLineCr[0];
+                r = ConvertYCrCbToRGB(y1, cr, cb);
+                lpDibLine1[4] = r.B;
+                lpDibLine1[5] = r.G;
+                lpDibLine1[6] = r.R;
+                lpDibLine1[7] = 0; // Alpha
 
-                    RGBQUAD r = ConvertYCrCbToRGB(y0, cr, cb);
-                    lpDibLine1[0] = r.B;
-                    lpDibLine1[1] = r.G;
-                    lpDibLine1[2] = r.R;
-                    lpDibLine1[3] = 0; // Alpha
+                r = ConvertYCrCbToRGB(y2, cr, cb);
+                lpDibLine2[0] = r.B;
+                lpDibLine2[1] = r.G;
+                lpDibLine2[2] = r.R;
+                lpDibLine2[3] = 0; // Alpha
 
-                    r = ConvertYCrCbToRGB(y1, cr, cb);
-                    lpDibLine1[4] = r.B;
-                    lpDibLine1[5] = r.G;
-                    lpDibLine1[6] = r.R;
-                    lpDibLine1[7] = 0; // Alpha
+                r = ConvertYCrCbToRGB(y3, cr, cb);
+                lpDibLine2[4] = r.B;
+                lpDibLine2[5] = r.G;
+                lpDibLine2[6] = r.R;
+                lpDibLine2[7] = 0; // Alpha
 
-                    r = ConvertYCrCbToRGB(y2, cr, cb);
-                    lpDibLine2[0] = r.B;
-                    lpDibLine2[1] = r.G;
-                    lpDibLine2[2] = r.R;
-                    lpDibLine2[3] = 0; // Alpha
+                lpLineY1 += 2;
+                lpLineY2 += 2;
+                lpLineCr += 2;
+                lpLineCb += 2;
 
-                    r = ConvertYCrCbToRGB(y3, cr, cb);
-                    lpDibLine2[4] = r.B;
-                    lpDibLine2[5] = r.G;
-                    lpDibLine2[6] = r.R;
-                    lpDibLine2[7] = 0; // Alpha
-
-                    lpLineY1 += 2;
-                    lpLineY2 += 2;
-                    lpLineCr += 2;
-                    lpLineCb += 2;
-
-                    lpDibLine1 += 8;
-                    lpDibLine2 += 8;
-                }
-
-                pDest += (2 * lDestStride);
-                lpBitsY += (2 * lSrcStride);
-                lpBitsCr += lSrcStride;
-                lpBitsCb += lSrcStride;
+                lpDibLine1 += 8;
+                lpDibLine2 += 8;
             }
-        }
 
-        //-------------------------------------------------------------------
-        // LetterBoxDstRect
-        //
-        // Takes a src rectangle and constructs the largest possible
-        // destination rectangle within the specified destination rectangle
-        // such that the video maintains its current shape.
-        //
-        // This function assumes that pels are the same shape within both the
-        // source and destination rectangles.
-        //
-        //-------------------------------------------------------------------
-        private static Rectangle LetterBoxRect(Rectangle rcSrc, Rectangle rcDst)
+            pDest += (2 * lDestStride);
+            lpBitsY += (2 * lSrcStride);
+            lpBitsCr += lSrcStride;
+            lpBitsCb += lSrcStride;
+        }
+    }
+
+    //-------------------------------------------------------------------
+    // LetterBoxDstRect
+    //
+    // Takes a src rectangle and constructs the largest possible
+    // destination rectangle within the specified destination rectangle
+    // such that the video maintains its current shape.
+    //
+    // This function assumes that pels are the same shape within both the
+    // source and destination rectangles.
+    //
+    //-------------------------------------------------------------------
+    private static Rectangle LetterBoxRect(Rectangle rcSrc, Rectangle rcDst)
         {
             int iDstLBWidth;
             int iDstLBHeight;
