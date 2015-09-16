@@ -16,7 +16,8 @@ namespace VideoModule
     {
         #region Definitions
 
-        private static readonly Color DefualtBackColor = Color.Gray;
+        private static readonly Color DefaultBackColor = Color.Gray;
+        private static readonly Color NullBackColor = Color.CornflowerBlue;
         private const int NUM_BACK_BUFFERS = 2;
 
         /// <summary>
@@ -462,6 +463,21 @@ namespace VideoModule
         //[DllImport("kernel32.dll", EntryPoint = "CopyMemory", SetLastError = false)]
         //private static extern void CopyMemory(IntPtr dest, IntPtr src, uint count);
 
+        public int DrawNullFrame()
+        {
+            // Color fill the back buffer.
+            var pBB = pDevice.GetBackBuffer(0, 0);
+
+            pDevice.ColorFill(pBB, NullBackColor);
+
+            // Present the frame.
+            var res = pDevice.Present();
+            var hr = res.Code;
+
+            SafeRelease(pBB);
+            return hr;
+        }
+
         //-------------------------------------------------------------------
         // DrawFrame
         //
@@ -549,7 +565,7 @@ namespace VideoModule
             // Color fill the back buffer.
             var pBB = pDevice.GetBackBuffer(0, 0);
 
-            pDevice.ColorFill(pBB, DefualtBackColor);
+            pDevice.ColorFill(pBB, DefaultBackColor);
 
             // Blit the frame.
             

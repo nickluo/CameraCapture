@@ -154,7 +154,6 @@ namespace VideoModule
         public int SetDevice(MfDevice pDevice, ref string format)
         {
             int hr;
-
             IMFMediaSource pSource = null;
             lock (LockSync)
             {
@@ -251,6 +250,7 @@ namespace VideoModule
                 pActivate?.ShutdownObject();
                 pActivate = null;
                 PwszSymbolicLink = null;
+                Draw.DrawNullFrame();
             }
             return S_Ok;
         }
