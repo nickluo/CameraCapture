@@ -48,11 +48,11 @@ namespace VideoModule
 
         private MfDevice activeDevice;
 
-        void OnActivate(IDeviceInfo moniker)
+        private void OnActivate(IDeviceInfo moniker)
         {
             activeDevice = moniker as MfDevice;
             var format = string.Empty;
-            var hr = camProcess.SetDevice(activeDevice,ref format);
+            var hr = camProcess.SetDevice(activeDevice, ref format);
             if (!string.IsNullOrEmpty(format))
                 eventAggregator.GetEvent<NoticeFormatEvent>().Publish(format);
             MFError.ThrowExceptionForHR(hr);

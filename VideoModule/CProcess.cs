@@ -143,6 +143,8 @@ namespace VideoModule
             return index;
         }
 
+        private IMFActivate pActivate;
+
         //-------------------------------------------------------------------
         // SetDevice
         //
@@ -153,7 +155,6 @@ namespace VideoModule
         {
             int hr;
 
-            var pActivate = pDevice.Activator;
             IMFMediaSource pSource = null;
             lock (LockSync)
             {
@@ -161,7 +162,7 @@ namespace VideoModule
                 {
                     // Release the current device, if any.
                     hr = CloseDevice();
-
+                    pActivate = pDevice.Activator;
                     object o = null;
                     if (Succeeded(hr))
                     {
@@ -186,14 +187,15 @@ namespace VideoModule
                     if (Succeeded(hr))
                     {
                         var index = GetOptimizedFormatIndex(ref format);
-                        if (index>0)
+                        if (index>=0)
                             hr = ConfigureSourceReader(index);
                     }
 
                     if (Failed(hr))
                     {
+                        
                         pSource?.Shutdown();
-
+                        //pActivate.ShutdownObject();
                         // NOTE: The source reader shuts down the media source
                         // by default, but we might not have gotten that far.
                         CloseDevice();
@@ -246,6 +248,8 @@ namespace VideoModule
             {
                 SafeRelease(PReader);
                 PReader = null;
+                pActivate?.ShutdownObject();
+                pActivate = null;
                 PwszSymbolicLink = null;
             }
             return S_Ok;
