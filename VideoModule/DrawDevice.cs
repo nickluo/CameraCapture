@@ -7,6 +7,7 @@ using MediaFoundation;
 using MediaFoundation.Misc;
 using SlimDX;
 using SlimDX.Direct3D9;
+using System.Diagnostics;
 
 namespace VideoModule
 {
